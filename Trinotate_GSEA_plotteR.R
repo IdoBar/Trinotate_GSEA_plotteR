@@ -232,13 +232,18 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
     infile <- file.path(outDir,pngName, fsep=fsep)
     outfile <- file.path(outDir,paste0("Rotated_", pngName), fsep=fsep)
     if (.Platform$OS.type=="windows") {
-      system2("powershell", args=c("-ExecutionPolicy ByPass -command .\\FlipImage.ps1",
-                                   infile, outfile), wait = FALSE, invisible = TRUE)
-      Sys.sleep(3)
-    } else system2("convert",args=c(infile, "-rotate",angle, outfile),
+      system2("powershell", args=c("-ExecutionPolicy ByPass -command lib\\FlipImage.ps1",
+                                   infile, outfile), wait = TRUE, invisible = TRUE)
+      error_msg <- sprintf("Could not rotate image or save it into <%s>, please verify that Powershell and lib\\FlipImage.ps1 are available in the current working directory", outfile)
+      } else {
+        system2("convert",args=c(infile, "-rotate",angle, outfile),
                    wait = TRUE, invisible = TRUE)
+        error_msg <- sprintf("Could not rotate image or save it into <%s>, please verify that ImageMagick is available in the PATH\n or download it from http://www.imagemagick.org/script/binary-releases.php#unix", outfile)
+      }
+    if (!file.exists(outfile)) message(error_msg)
   }
-  if (rotate) imageFlip()
+  if (rotate && plotFormat=="png") imageFlip()
+
 }
 
 
@@ -293,7 +298,7 @@ minBlastScore <- 100
 
 
 # Fetch ORF data from Trinotate.sqlite
-Trinotate <- src_sqlite("Trinotate.sqlite")
+Trinotate <- src_sqlite("H:/Masha_RNAseq_DATA/de_novo_Trinotate_db/Lentils_Trinotate.sqlite")
 
 # Get specific DE analysis table (either from trinotate or upload from a tab-delimited edgeR or DESeq2 output file with a "contrast" column sepcifying the DE contrast(s))
 DE_analysis <- "ORF_DE_kallisto"
@@ -325,7 +330,7 @@ analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
 # GSEA2Trinotate(Trinotate, geneset_results, analysis_name)
 
 # Plot 1 contrast:
-#plotGSEA(geneset_results, cont = contrasts[1])
+plotGSEA(geneset_results, cont = contrasts[1], savePlot = TRUE, saveFormat = "png", rotateSavedPlot = TRUE)
 
 # plot all contrasts (vertical, no facets).
 sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, savePlot = TRUE))
