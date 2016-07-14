@@ -17,6 +17,11 @@
 # RStudio files
 .Rproj.user/
 
+# Produced plots
+*.pdf
+*.png
+*plots/
+
 # produced vignettes
 vignettes/*.html
 vignettes/*.pdf
@@ -74,3 +79,4 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+.Rproj.user
