@@ -113,19 +113,20 @@ GSEA2Trinotate <- function(trinotateDb, GSEA_results, tableName) {
 }
 
 # Make term names shorter and prettier - better to do that vectorized and then figure out duplicates as well
-pretty_term <- function(term, comma=TRUE, dot=TRUE, paren=TRUE, cap=TRUE) {
+pretty_term <- function(term, comma=TRUE, dot=TRUE, paren=TRUE, cap=TRUE, len=45) {
   term <- sapply(term, function (s) {
     if (paren) s <- sub(" \\(.+\\)", "",  s)
     if (cap) s <- sub("(^.)", "\\U\\1", s, perl=TRUE)
     if (dot) s <- unlist(strsplit(s, ".", fixed = TRUE))[1]
     if (comma) s <- unlist(strsplit(s, ",", fixed = TRUE))[1]
+    if (len>0) s <- sub(sprintf("(^.{%s}[\\S]*)[ ].+", len), "\\1\\^", s, perl=TRUE)
     return(s)
   }, USE.NAMES = FALSE)
   return(term)
 }
 
 # vertical plot function
-GSEA_vert_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
+GSEA_vert_plot <- function(GSEA_set,cols, bar_cols, facet=FALSE) {
   vert_plot <- ggplot(GSEA_set, aes(y=numDEInCat, x=reorder(cont_term, order),
                                     fill=Over_represented_in))
 
@@ -154,14 +155,14 @@ GSEA_vert_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
   p <- vert_plot + labs(y="Number of DE genes", x="Term") +
     geom_bar(stat="identity",colour="black", width=0.4) + GSEA_vert_theme +
     #  scale_y_log10(limits=c(1,1000), breaks=10^(0:3), expand = c(0,0.05)) +
-    scale_fill_brewer(palette = "Set2", guide = guide_legend(direction = "horizontal",
+    scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in], guide = guide_legend(direction = "horizontal",
                                                              label.position="bottom", label.hjust = 0.5, label.vjust = 0.5,                                                   label.theme = element_text(angle = 90, size=20))) +
     scale_y_continuous(expand = c(0,ceiling(max(GSEA_set$numDEInCat)*1.2)/70), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) + scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_term), GSEA_set$order))
   #title.theme = element_text(angle = 90, face="bold", size=20)
   facet_plot <- vert_plot + labs(y="Number of DE genes", x="Term") +
     geom_bar(stat="identity",colour="black", width=0.4) +
     #  scale_y_log10(limits=c(1,1000), breaks=10^(0:3), expand = c(0,0.05)) +
-    scale_fill_brewer(palette = "Set2") + scale_y_continuous(expand = c(0,ceiling(max(GSEA_set$numDEInCat)*1.2)/70), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) + facet_grid(. ~ Over_represented_in, scales="free_x", space="free_x") + GSEA_vert_facet_theme + scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_term), GSEA_set$order))
+    scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) + scale_y_continuous(expand = c(0,ceiling(max(GSEA_set$numDEInCat)*1.2)/70), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) + facet_grid(. ~ Over_represented_in, scales="free_x", space="free_x") + GSEA_vert_facet_theme + scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_term), GSEA_set$order))
   if (facet) facet_plot
   else p
 }
@@ -169,7 +170,7 @@ GSEA_vert_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
 
 ## @knitr horizontalPlot
 # Horizontal plot function
-GSEA_horiz_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
+GSEA_horiz_plot <- function(GSEA_set,cols, bar_cols, facet=FALSE) {
   # Define the theme
   GSEA_horizontal_theme <- theme_bw(base_size=18) +
     theme(axis.title.y=element_text(face="bold", vjust = 1.5, size=rel(0.8)),
@@ -186,7 +187,7 @@ GSEA_horiz_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
   h <- horiz_plot +
     geom_bar(colour="black", width=0.5, stat="identity", position="identity") +
     #geom_errorbar(aes(ymin=abs_log2FC-se, ymax=abs_log2FC+se), width=.2, size=0.8)
-    coord_fixed() + scale_fill_brewer(palette = "Set2") +
+    coord_fixed() + scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
     geom_hline(yintercept=0) +
     scale_y_continuous(expand = c(0,0), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) +
     scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_cat), GSEA_set$order)) +
@@ -210,7 +211,7 @@ GSEA_horiz_plot <- function(GSEA_set,cols=ontology_cols, facet=FALSE) {
     geom_bar(colour="black", width=0.5, stat="identity", position="identity") +
     #geom_errorbar(aes(ymin=abs_log2FC-se, ymax=abs_log2FC+se), width=.2, size=0.8)
     facet_grid(. ~ Over_represented_in, scales="free_x", space="free_x") +
-    coord_fixed() + scale_fill_brewer(palette = "Set2") +
+    coord_fixed() + scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
     geom_hline(yintercept=0) +
     scale_y_continuous(expand = c(0,0), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) +
     scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_cat), GSEA_set$order)) +
@@ -248,7 +249,7 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
 
 
 # Produce plots function
-plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=list(go_cols=c(BP="darkred", CC="darkgreen", MF="darkblue"), cog_cols=c(COG="black", eggNOG="purple4")),groupOntology=TRUE, orientation="vert", facet=FALSE, savePlot=TRUE, saveFormat="pdf", rotateSavedPlot=FALSE) {
+plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=list(go_cols=c(BP="darkred", CC="darkgreen", MF="darkblue"), cog_cols=c(COG="black", eggNOG="purple4")), bar_cols="Set1", groupOntology=TRUE, orientation="vert", facet=FALSE, savePlot=TRUE, saveFormat="pdf", rotateSavedPlot=FALSE) {
 
 # short_term=sapply(term, function(t) pretty_term(t, comma=TRUE), USE.NAMES = FALSE)
   # Prepare and filter the geneset by FDR or pvalue and then by contrast. Add needed columns
@@ -272,8 +273,20 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
   #sortOrder <- ifelse(groupOntology,list("Over_represented_in", orientation_term, "desc(numDEInCat)"), list("Over_represented_in", "desc(numDEInCat)") )
   if (groupOntology) GSEA_comparison <- GSEA_comparison %>% arrange_("Over_represented_in", orientation_term, "desc(numDEInCat)") %>% mutate(order=1:nrow(.))
 
-  # Assign ontology colors for each contrast level
+  # Assign ontology and bar colors for each contrast level
   geneset_analysis <- ifelse(grepl("^GO.+", GSEA_comparison[1,1], ignore.case = TRUE), "GO", "COG")
+  defaultBrewerPal <- "Set1"
+  #brewerPal <- switch(geneset_analysis,"GO" = "Set1", "COG"="Set2")
+  if(length(bar_cols)==length(levels(GSEA_comparison$Over_represented_in)) && all(levels(GSEA_comparison$Over_represented_in) %in% names(named_bar_cols))) {
+    named_bar_cols <- bar_cols
+    } else if (is.character(bar_cols) && length(bar_cols)==1) {
+    tryCatch(brewerSet<-brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), bar_cols), error=function(e) {message(sprintf("Warning: %sUsing %s instead", e$message, defaultBrewerPal)); brewerSet<-brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), defaultBrewerPal)} )
+    #print(brewerSet)
+    named_bar_cols <- setNames(brewerSet, levels(GSEA_comparison$Over_represented_in))
+    } else {
+      message(sprintf("Warning: Bar colours for each contrast level were not defined, using RColorBrewer \"%s\" instead", defaultBrewerPal))
+      named_bar_cols <- setNames(brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), defaultBrewerPal), levels(GSEA_comparison$Over_represented_in))
+  }
   ontology_cols <- NULL
   if (length(ont_cols)>0) {
     for (i in unique(GSEA_comparison$Over_represented_in)) {
@@ -281,7 +294,7 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
       ontology_cols <- c(ontology_cols, setNames(as.vector(ont_cols[[col_list]]), outer(i, names(ont_cols[[col_list]]),paste, sep="_")))
     }
   }
-  print(eval(parse(text=paste("GSEA", orientation, "plot(GSEA_comparison, ontology_cols, facet)", sep="_"))))
+  print(eval(parse(text=paste("GSEA", orientation, "plot(GSEA_comparison, cols=ontology_cols, bar_cols=named_bar_cols, facet=facet)", sep="_"))))
   if (savePlot) save_GSEA_Plot(GSEA_comparison, orientation, rotateSavedPlot, saveFormat, geneset = geneset_analysis)
 }
 
@@ -329,11 +342,15 @@ geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(geneset_data$gen
 analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
 # GSEA2Trinotate(Trinotate, geneset_results, analysis_name)
 
+# Manually set bar colours (Use Set1, but remove the purple which is too similar to the red):
+brewerSet<-brewer.pal(length(levels(geneset_results$Over_represented_in))+1, "Set1")[-4]
+# Create a named vector with color for each contrast level
+bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_in))
 # Plot 1 contrast:
-plotGSEA(geneset_results, cont = contrasts[1], savePlot = TRUE, saveFormat = "png", rotateSavedPlot = TRUE)
+#plotGSEA(geneset_results, cont = contrasts[2], savePlot = FALSE, saveFormat = "png", rotateSavedPlot = FALSE)
 
 # plot all contrasts (vertical, no facets).
-sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, savePlot = TRUE))
+sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<0.1", savePlot = TRUE))
 
 # GSEA_filter="pvalue<=0.01"
 
