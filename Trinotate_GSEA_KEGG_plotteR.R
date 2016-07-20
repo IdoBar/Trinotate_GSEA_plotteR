@@ -44,7 +44,7 @@ library(dplyr)
 ###### Functions ############
 
 # Get and prepare relevant geneset and DE tables function
-prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", minPfamScore=20, minBlastScore=100, max_FDR=0.05, min_log2FC=2) {
+prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", minPfamScore=20, minBlastScore=100, max_FDR=0.05, min_log2FC=2, ko_table=NULL) {
   # Change SQL query based on DE level (transcript or orf) from DE analysis or specify manualy
   sql_select <- gsub(paste0("as ", Id_type, "_id,"), "as Trinity_Id,",  sub(paste0("as ", Id_type, "_length,"), "as length,", "SELECT O.orf_id as orf_id, O.transcript_id as transcript_id, O.length as orf_length, length(T.sequence) as transcript_length,"), perl=TRUE)
 
@@ -55,20 +55,22 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
   COG_sql <- sprintf(' S.BitScore, S.Evalue,  E.eggNOGIndexTerm as term, E.eggNOGDescriptionValue as COG_desc from BlastDbase S JOIN UniprotIndex U ON S.UniprotSearchString=U.Accession JOIN eggNOGIndex E ON U.LinkId=E.eggNOGIndexTerm JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="E" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
 
   # KEGG Annotation from UniProt blastp (grouped by best BitScore ORF)
-  KEGG_sql <- sprintf(' S.BitScore, S.Evalue,  substr(U.LinkId, 1, U.pos-1) as ontology, substr(U.LinkId, U.pos+1, U.pos2-1) as Kegg_species, substr(U.LinkId,U.pos2+U.pos+1) as term from BlastDbase S JOIN (select *, instr(LinkId,':') AS pos, instr(substr(LinkId, instr(LinkId,':')+1),':') AS pos2 from UniprotIndex) U ON S.UniprotSearchString=U.Accession WHERE U.AttributeType="K" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
+  KEGG_sql <- sprintf(' S.BitScore, S.Evalue,  substr(U.LinkId, 1, U.pos-1) as ontology, substr(U.LinkId, U.pos+1, U.pos2-1) as Kegg_species, substr(U.LinkId,U.pos2+U.pos+1) as term from BlastDbase S JOIN (select *, instr(LinkId,":") AS pos, instr(substr(LinkId, instr(LinkId,":")+1),":") AS pos2 from UniprotIndex) U ON S.UniprotSearchString=U.Accession JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="K" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
+
+  # KEGG KO Annotation from KOBAS
+  KO_sql <- sprintf(' S.BitScore, S.Evalue, KO_ID AS term, KO_name from %s JOIN ORF O USING (orf_id) JOIN Transcript T on O.transcript_id=T.transcript_id JOIN (SELECT TrinityID, BitScore, Evalue FROM BlastDbase WHERE instr(TrinityID, "m.")>0 AND BitScore>%s) S ON S.TrinityID=O.orf_id GROUP BY Trinity_Id HAVING MAX(S.BitScore)',ko_table, minBlastScore)
 
 
   sql_query <- switch (tolower(geneset),
                        "go" = paste0(sql_select, GO_sql),
                        "cog" = paste0(sql_select, COG_sql),
-                       "kegg" = paste0(sql_select, KEGG_sql)
+                       "kegg" = paste0(sql_select, KEGG_sql),
+                       "ko" = paste0(sql_select, KO_sql)
   )
  # geneset_tables <- list(geneset_data=NULL, geneset_DE_data=NULL)
   geneset_table <- tbl(Trinotatedb, sql(sql_query)) %>% collect()
-  geneset_DE_data <- DE_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_table$term[match(.$Trinity_Id, geneset_table$Trinity_Id)]) %>% filter(!is.na(.$term))
-  if (tolower(geneset)=="cog") {
-    geneset_DE_data$ontology <- ifelse(grepl("^ENOG.+", geneset_DE_data$term, perl=TRUE), "eggNOG","COG")
-  }
+  geneset_DE_data <- DE_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_table$term[match(.$Trinity_Id, geneset_table$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
+
   geneset_tables <- list(geneset_table=geneset_table, geneset_DE_data=geneset_DE_data)
   return(geneset_tables)
 
@@ -77,7 +79,7 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
 # Calculate GSEA values for DE genes for a specific contrast and geneset analysis
 GSEA <- function(de_data, go_data, contras, description, annotation_source, analysis_date=format(Sys.Date(), "%d/%m/%Y"), geneset="GO") {
   contrast_levels <- unlist(strsplit(contras, "_vs_"))
-  if (tolower(geneset)=="cog") cog_dict <- unique(go_data[c("term","COG_desc")])
+
   GOseq_result_table <- NULL
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
@@ -91,7 +93,7 @@ GSEA <- function(de_data, go_data, contras, description, annotation_source, anal
     #ORF_GO_info <- data.frame(orf_go$orf_id, orf_go$term)
     go_data_info <- data.frame(go_data$term, row.names = go_data$Trinity_Id)
     go_data_info_listed = apply(go_data_info, 1, function(x) unique(unlist(strsplit(x,','))))
-    if (tolower(geneset)=="cog") go_data_info_listed <- data.frame(go_data$Trinity_Id, go_data$term)
+    if (tolower(geneset)!="go") go_data_info_listed <- data.frame(go_data$Trinity_Id, go_data$term)
     GOseq_res = goseq(go_data_pwf,gene2cat=go_data_info_listed)
 
     ## over-represented categories:
@@ -100,14 +102,35 @@ GSEA <- function(de_data, go_data, contras, description, annotation_source, anal
     q = qvalue(pvals)
     #GOseq_res$over_represented_FDR = q$qvalues
     GOseq_result_table <- GOseq_res %>% mutate(over_represented_FDR = q$qvalues, contrast=contras,
-                                               Over_represented_in=contrast_levels[i], DE_padj=max_FDR, DE_log2FC=min_log2FC,
+                                               Over_represented_in=contrast_levels[i], DE_padj=max_FDR,
+                                               DE_log2FC=min_log2FC,
                                                analysis_date=analysis_date, annotation_source=annotation_source,
                                                DE_analysis=DE_analysis, description=description) %>%
       arrange(over_represented_FDR) %>% bind_rows(GOseq_result_table, .)
-    if (tolower(geneset)=="cog") {
-      GOseq_result_table <- GOseq_result_table %>% mutate(ontology=de_data$ontology[match(.$category, de_data$term)], term=cog_dict$COG_desc[match(.$category, cog_dict$term)])
-    }
   }
+    if (tolower(geneset)!="go") {
+      # Set the appropriate ontology
+      GOseq_result_table$ontology <- switch (tolower(geneset),
+                  "cog" = ifelse(grepl("^ENOG.+", GOseq_result_table$category, perl=TRUE), "eggNOG","COG"),
+                  "kegg" = sapply(de_data$Kegg_species[match(GOseq_result_table$category, de_data$term)],
+                                  function(s) sub("(^.)", "\\U\\1", s, perl=TRUE),USE.NAMES = FALSE),
+                  "ko" = "KO"
+      )
+
+      if (tolower(geneset)=="ko") {
+        # Setup KEGG_KO description table and terms
+        cat(sprintf("Please wait, preparing KEGG orthologies information..."), file=stderr())
+        kegg_ko <- kegg.gsets("ko")
+        term_dict <- data.frame(term=gsub('(ko[0-9]*) .*','\\1', names(kegg_ko[[1]])), desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
+      }
+      # Prepare description dictionaries for COG and KO (Think about a solution for KEGG)
+      term_dict <- switch (tolower(geneset),
+                          "cog" = unique(go_data[c("term","desc")]),
+                          "ko" =data.frame(term=gsub('(ko[0-9]*) .*','\\1', names(kegg_ko[[1]])),
+                                           desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
+                              )
+      GOseq_result_table <- GOseq_result_table %>% mutate(term=term_dict$desc[match(.$category, term_dict$term)])
+    }
   return(GOseq_result_table)
 }
 
@@ -318,7 +341,7 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
 #### Goseq analysis ##########
 
 # define parameters
-geneset_analysis <- "COG"
+geneset_analysis <- "GO"
 max_FDR <- 0.05
 min_log2FC <- 2
 min_eValue <- 1e-5
@@ -327,10 +350,10 @@ minBlastScore <- 100
 
 
 # Fetch ORF data from Trinotate.sqlite
-Trinotate <- src_sqlite("H:/Masha_RNAseq_DATA/de_novo_Trinotate_db/Lentils_Trinotate.sqlite")
+Trinotate <- src_sqlite("Oyster_Gonad_Trinotate.sqlite")
 
 # Get specific DE analysis table (either from trinotate or upload from a tab-delimited edgeR or DESeq2 output file with a "contrast" column sepcifying the DE contrast(s))
-DE_analysis <- "ORF_DE_kallisto"
+DE_analysis <- "edgeR_DE"
 DE_table <- tbl(Trinotate, DE_analysis) %>% collect()
 # DE_table <- read.delim("DE_Analysis_filename")
 
@@ -346,7 +369,10 @@ contrasts <- grep("_vs_",levels(factor(DE_table$contrast)), value = TRUE)
 GO_description <- paste("GO annotation from PFAM, with FullDomainScore>20, based on", DE_analysis)
 GO_annotation_source <- "PFAM"
 
+
+############## GO analysis  #####################
 # Fetch and process GO data
+geneset_analysis <- "GO"
 geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type,DE_table, geneset = geneset_analysis)
 geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(geneset_data$geneset_DE_data, geneset_data$geneset_table, contras = x, description = GO_description, annotation_source = GO_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("ontology","contrast", "Over_represented_in"))
 
@@ -365,8 +391,9 @@ bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_i
 # plot all contrasts (vertical, no facets).
 sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35"))
 
-
+###########  COG analysis #################
 # Fetch and process COG data
+geneset_analysis <- "COG"
 # details of COG analysis
 COG_description <- paste("COG annotation from UniProt Diamond blastp, with BitScore>100, based on" , DE_analysis)
 COG_annotation_source <- "UniProt_eggNOG"
@@ -389,5 +416,18 @@ analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
 # plot all contrasts (vertical, no facets).
 sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35"))# GSEA_filter="pvalue<=0.01"
 
-# GSEA_horiz_plot(GSEA_comparison)
-# save_GSEA_Plot(GSEA_comparison, orientation = "horizontal")
+#####################  KO analysis ######################
+# details of KO analysis
+ko_table <- "ORF_KO"
+geneset_analysis <- "KO"
+GSEA_description <- sprintf("%s annotation from UniProt Diamond blastp, with BitScore>%s, based on %s" , geneset_analysis, minBlastScore, DE_analysis)
+GSEA_annotation_source <- "KOBAS"
+
+geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type,DE_table, geneset = geneset_analysis, ko_table = ko_table)
+geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(geneset_data$geneset_DE_data, geneset_data$geneset_table, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("ontology","contrast", "Over_represented_in"))
+
+# deposit the results back to a table in Trinotate
+# Load data to Trinotate sqlite db
+analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
+# plot all contrasts (vertical, no facets).
+sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35"))# GSEA_filter="pvalue<=0.01"
