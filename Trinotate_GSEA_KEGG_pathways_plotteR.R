@@ -197,7 +197,8 @@ pretty_term <- function(term, comma=TRUE, dot=TRUE, paren=TRUE, cap=TRUE, charNu
 }
 
 # vertical plot function
-GSEA_vert_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE) {
+GSEA_vert_plot <- function(GSEA_set,geneset_analysis, cols, bar_cols, bar_width=0.4, facet=FALSE) {
+
   vert_plot <- ggplot(GSEA_set, aes(y=numDEInCat, x=reorder(cont_term, order),
                                     fill=Over_represented_in))
 
@@ -245,7 +246,8 @@ GSEA_vert_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE) 
 
 ## @knitr horizontalPlot
 # Horizontal plot function
-GSEA_horiz_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE) {
+GSEA_horiz_plot <- function(GSEA_set, cols,  bar_cols, bar_width=0.4, facet=FALSE) {
+
   # Define the theme
   GSEA_horizontal_theme <- theme_bw(base_size=18) +
     theme(axis.title.y=element_text(face="bold", vjust = 1.5, size=rel(0.8)),
@@ -293,6 +295,25 @@ GSEA_horiz_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE)
   if (facet) hf
   else h
 }
+
+# Plot ontology legend (as separate plot)
+plot_Ont_legend <- function(geneset_analysis=geneset_analysis, ont_cols=list(go_cols=c("Biological Process"="darkred", "Cell Cycle"="darkgreen", "Molecular Function"="darkblue"), cog_cols=c(COG="black", eggNOG="purple4"))){
+  library(gridExtra)
+  # sort out ontology colors for each level
+  if (length(ont_cols)>0) {
+    col_list <- paste0(tolower(geneset_analysis), "_cols")
+    ontology_cols <- ont_cols[[col_list]]
+  } else stop("No colours were defined for Ontology.", call. = FALSE)
+  ont_legend <- data.frame(labels=names(ontology_cols), cols=as.vector(ontology_cols), x=0.05)
+  ont_legend$y <- 0.8 - as.numeric(row.names(ont_legend))/10
+  grid.newpage()
+  vp1 <- viewport(width=0.45, height = 0.45)
+  pushViewport(vp1)
+  grid.rect()
+  grid.text(paste(geneset_analysis,"Ontologies"), x = 0.05, y=0.825, just="left", gp=gpar(fontsize=23, fontface="bold"))
+  grid.text(ont_legend$labels,ont_legend$x, ont_legend$y, just="left", gp=gpar(fontsize=20, col=as.character(ont_legend$cols)))
+}
+
 
 # Save plot function
 save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf", geneset=geneset_analysis, width=10, height=15){
@@ -363,9 +384,10 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
       message(sprintf("Warning: Bar colours for each contrast level were not defined, using RColorBrewer \"%s\" instead", defaultBrewerPal))
       named_bar_cols <- setNames(brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), defaultBrewerPal), levels(GSEA_comparison$Over_represented_in))
     }
+  # sort out ontology colors for each level
   ontology_cols <- NULL
   if (length(ont_cols)>0) {
-    for (i in unique(GSEA_comparison$Over_represented_in)) {
+    for (i in unique(GSEA_set$Over_represented_in)) {
       col_list <- paste0(tolower(geneset_analysis), "_cols")
       ontology_cols <- c(ontology_cols, setNames(as.vector(ont_cols[[col_list]]), outer(i, names(ont_cols[[col_list]]),paste, sep="_")))
     }
@@ -426,7 +448,10 @@ bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_i
 #plotGSEA(geneset_results, cont = contrasts[1], groupOntology = -1, bar_cols = bar_color_names, bar_width = 0.45, savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 15)
 
 # plot all contrasts (vertical, no facets).
-sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35"))
+sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "pvalue<=0.05", savePlot = TRUE, prettyTermOpts = "charNum=35"))
+
+# Plot GO ontology legend (as separate plot)
+plot_Ont_legend(geneset_analysis = "GO")
 
 ###########  COG analysis #################
 # details of COG analysis
@@ -472,8 +497,26 @@ analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
 brewerSet<-brewer.pal(length(levels(geneset_results$Over_represented_in))+1, "Set1")[-4]
 # Create a named vector with color for each contrast level
 bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_in))
+
+# set ontology colours
+ko_ont_cols <- list(ko_cols=setNames(brewer.pal(length(unique(geneset_results$ontology)), "Dark2"), unique(geneset_results$ontology)))
 # Plot just 1 contrast:
-#plotGSEA(geneset_results, cont = contrasts[1], groupOntology = 1, ont_cols = list(ko_cols=setNames(brewer.pal(length(unique(geneset_results$ontology)), "Dark1"), unique(geneset_results$ontology))), GSEA_filter = "pvalue<=0.05", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = FALSE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10)
+#plotGSEA(geneset_results, cont = contrasts[1], groupOntology = 1, ont_cols = ko_ont_cols, GSEA_filter = "pvalue<=0.05", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=45", savePlot = FALSE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10)
 
 # plot all contrasts (vertical, no facets).
-sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, groupOntology = 0, GSEA_filter = "FDR<=0.1", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = FALSE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10, ont_cols = list(ko_cols=setNames(brewer.pal(length(unique(geneset_results$ontology)), "Dark1"), unique(geneset_results$ontology)))))# GSEA_filter="pvalue<=0.01"
+sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, groupOntology = 1, ont_cols = ko_ont_cols, GSEA_filter = "pvalue<=0.05", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=45", savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10))# GSEA_filter="pvalue<=0.01"
+
+# Plot ontology legend (as separate plot)
+plot_Ont_legend(geneset_analysis = geneset_analysis, ont_cols = ko_ont_cols)
+
+# library(gridExtra)
+# ont_legend <- data.frame(labels=names(ko_cols), cols=as.vector(ko_cols), x=0.05)
+# ont_legend$y <- 0.8 - as.numeric(row.names(ont_legend))/10
+# grid.newpage()
+# vp1 <- viewport(width=0.45, height = 0.45)
+# pushViewport(vp1)
+# grid.rect()
+# grid.text(paste(geneset_analysis,"Ontologies"), x = 0.05, y=0.825, just="left", gp=gpar(fontsize=23, fontface="bold"))
+# grid.text(ont_legend$labels,ont_legend$x, ont_legend$y, just="left", gp=gpar(fontsize=20, col=as.character(ont_legend$cols)))
+
+#grid.arrange(g)
