@@ -48,6 +48,8 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
   # Change SQL query based on DE level (transcript or orf) from DE analysis or specify manualy
   sql_select <- gsub(paste0("as ", Id_type, "_id,"), "as Trinity_Id,",  sub(paste0("as ", Id_type, "_length,"), "as length,", "SELECT O.orf_id as orf_id, O.transcript_id as transcript_id, O.length as orf_length, length(T.sequence) as transcript_length,"), perl=TRUE)
 
+  Id_type_select <- switch(Id_type, "orf"=">", "transcript"="=")
+
   # GO annotation from PFAM (with Score>20)
   GO_sql <- sprintf(" substr(H.pfam_id,1,7) pfam_acc, G.GO_terms as term, H.FullDomainScore FROM (SELECT * FROM HMMERDbase WHERE FullSeqScore>%s AND FullDomainScore>%s GROUP BY QueryProtID HAVING MAX(FullSeqScore) AND MAX(FullDomainScore)) H JOIN (SELECT pfam_acc, group_concat(go_id) AS GO_terms FROM pfam2go GROUP BY pfam_acc) G ON substr(H.pfam_id,1,7)=G.pfam_acc JOIN ORF O ON (H.QueryProtID=O.orf_id) JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY Trinity_Id HAVING MAX(H.FullSeqScore)",minPfamScore, minPfamScore )
 
@@ -58,9 +60,9 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
   KEGG_sql <- sprintf(' S.BitScore, S.Evalue,  substr(U.LinkId, 1, U.pos-1) as ontology, substr(U.LinkId, U.pos+1, U.pos2-1) as Kegg_species, substr(U.LinkId,U.pos2+U.pos+1) as term from BlastDbase S JOIN (select *, instr(LinkId,":") AS pos, instr(substr(LinkId, instr(LinkId,":")+1),":") AS pos2 from UniprotIndex) U ON S.UniprotSearchString=U.Accession JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="K" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
 
   # KEGG KO Annotation from KOBAS
-  KO_sql <- sprintf(' S.BitScore, S.Evalue, KO_ID AS term, KO_name from %s JOIN ORF O USING (orf_id) JOIN Transcript T on O.transcript_id=T.transcript_id JOIN (SELECT TrinityID, BitScore, Evalue FROM BlastDbase WHERE instr(TrinityID, "m.")>0 AND BitScore>%s) S ON S.TrinityID=O.orf_id GROUP BY Trinity_Id HAVING MAX(S.BitScore)',ko_table, minBlastScore)
+  KO_sql <- sprintf(' K.KO_ID AS term, K.KO_name as desc from (SELECT * FROM %s WHERE instr(TrinityID, "m.")%s0) K JOIN ORF O on K.TrinityID=O.%s JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY K.TrinityID HAVING min(O.rowid)',ko_table, Id_type_select, paste0(Id_type, "_id"))
 
-
+  # construct the whole SQL query
   sql_query <- switch (tolower(geneset),
                        "go" = paste0(sql_select, GO_sql),
                        "cog" = paste0(sql_select, COG_sql),
@@ -69,6 +71,7 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
   )
  # geneset_tables <- list(geneset_data=NULL, geneset_DE_data=NULL)
   geneset_table <- tbl(Trinotatedb, sql(sql_query)) %>% collect()
+  if (nrow(geneset_table)==0) stop(sprintf("No records were found in '%s' database.\nUsing the following query:\n %s\n", Trinotatedb, sql_query), call. = FALSE)
   geneset_DE_data <- DE_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_table$term[match(.$Trinity_Id, geneset_table$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
 
   geneset_tables <- list(geneset_table=geneset_table, geneset_DE_data=geneset_DE_data)
@@ -79,7 +82,11 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, DE_table, geneset="GO", mi
 # Calculate GSEA values for DE genes for a specific contrast and geneset analysis
 GSEA <- function(de_data, go_data, contras, description, annotation_source, analysis_date=format(Sys.Date(), "%d/%m/%Y"), geneset="GO") {
   contrast_levels <- unlist(strsplit(contras, "_vs_"))
-
+  if (tolower(geneset)=="ko") {
+    # Setup KEGG_KO description table and terms
+    cat(sprintf("Please wait, preparing KEGG orthologies information...\n"), file=stderr())
+    kegg_ko <- kegg.gsets("ko")
+  }
   GOseq_result_table <- NULL
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
@@ -100,7 +107,6 @@ GSEA <- function(de_data, go_data, contras, description, annotation_source, anal
     pvals = GOseq_res$over_represented_pvalue
     pvals[pvals > 1 -1e-10] = 1-1e-10
     q = qvalue(pvals)
-    #GOseq_res$over_represented_FDR = q$qvalues
     GOseq_result_table <- GOseq_res %>% mutate(over_represented_FDR = q$qvalues, contrast=contras,
                                                Over_represented_in=contrast_levels[i], DE_padj=max_FDR,
                                                DE_log2FC=min_log2FC,
@@ -117,19 +123,20 @@ GSEA <- function(de_data, go_data, contras, description, annotation_source, anal
                   "ko" = "KO"
       )
 
-      if (tolower(geneset)=="ko") {
-        # Setup KEGG_KO description table and terms
-        cat(sprintf("Please wait, preparing KEGG orthologies information..."), file=stderr())
-        kegg_ko <- kegg.gsets("ko")
-        term_dict <- data.frame(term=gsub('(ko[0-9]*) .*','\\1', names(kegg_ko[[1]])), desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
-      }
+
       # Prepare description dictionaries for COG and KO (Think about a solution for KEGG)
-      term_dict <- switch (tolower(geneset),
-                          "cog" = unique(go_data[c("term","desc")]),
-                          "ko" =data.frame(term=gsub('(ko[0-9]*) .*','\\1', names(kegg_ko[[1]])),
-                                           desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
-                              )
-      GOseq_result_table <- GOseq_result_table %>% mutate(term=term_dict$desc[match(.$category, term_dict$term)])
+        term_dict <- unique(go_data[c("term","desc")])
+#       term_dict <- switch (tolower(geneset),
+#                           "cog" = unique(go_data[c("term","desc")]),
+#                           "ko" = data.frame(term=gsub('ko([0-9]*) .*','K\\1', names(kegg_ko[[1]])),
+#                                            desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
+#                               )
+      GOseq_result_table <- GOseq_result_table %>% mutate(term=term_dict$desc[match(.$category, term_dict$term)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
+      if (tolower(geneset)=="ko") {
+        long_term_dict <- data.frame(term=gsub('ko([0-9]*) .*','K\\1', names(kegg_ko[[1]])),
+                                         desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
+        GOseq_result_table <- GOseq_result_table %>% mutate(long_term=long_term_dict$desc[match(.$category, long_term_dict$term, nomatch=NA_character_)])
+      }
     }
   return(GOseq_result_table)
 }
@@ -144,12 +151,16 @@ GSEA2Trinotate <- function(trinotateDb, GSEA_results, tableName) {
 # Make term names shorter and prettier - better to do that vectorized and then figure out duplicates as well
 pretty_term <- function(term, comma=TRUE, dot=TRUE, paren=TRUE, cap=TRUE, charNum=45) {
   term <- sapply(term, function (s) {
-    if (paren) s <- sub(" \\(.+\\)", "",  s)
-    if (cap) s <- sub("(^.)", "\\U\\1", s, perl=TRUE)
-    if (dot) s <- unlist(strsplit(s, ".", fixed = TRUE))[1]
-    if (comma) s <- unlist(strsplit(s, ",", fixed = TRUE))[1]
-    if (len>0) s <- sub(sprintf("(^.{%s}[\\S]*)[ ].+", charNum), "\\1\\^", s, perl=TRUE)
-    return(s)
+    s_ <- s
+    if (cap) s_ <- sub("(^.)", "\\U\\1", s_, perl=TRUE)
+    if (paren) s_ <- sub(" \\(.+\\)", "",  s_)
+    if (dot) s_ <- unlist(strsplit(s_, ".", fixed = TRUE))[1]
+    if (comma) s_ <- unlist(strsplit(s_, ",", fixed = TRUE))[1]
+    # Trim to the end of the word if character number limit is reached and remove any trailing commas or dots
+    if (charNum>0) s_ <- sub("[,|\\.]$", "", sub(sprintf("(^.{%s}[\\S]*)[ ]*.*", charNum), "\\1", s_, perl=TRUE), perl = TRUE)
+    # Add a ^ at the end if the term was trimmed anyhow
+    if (nchar(s_)<nchar(s) && !grepl("\\*$", s_)) return(paste0(s_, "^"))
+    else return(s_)
   }, USE.NAMES = FALSE)
   return(term)
 }
@@ -182,7 +193,6 @@ GSEA_vert_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE) 
 
   p <- vert_plot + labs(y="Number of DE genes", x="Term") +
     geom_bar(stat="identity",colour="black", width=bar_width) + GSEA_vert_theme +
-    #  scale_y_log10(limits=c(1,1000), breaks=10^(0:3), expand = c(0,0.05)) +
     scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in],
                       guide = guide_legend(direction = "horizontal",
                       label.position="bottom", label.hjust = 0.5, label.vjust = 0.5,                                                   label.theme = element_text(angle = 90, size=20))) +
@@ -192,7 +202,6 @@ GSEA_vert_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE) 
   #title.theme = element_text(angle = 90, face="bold", size=20)
   facet_plot <- vert_plot + labs(y="Number of DE genes", x="Term") +
     geom_bar(stat="identity",colour="black", width=bar_width) +
-    #  scale_y_log10(limits=c(1,1000), breaks=10^(0:3), expand = c(0,0.05)) +
     scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
     scale_y_continuous(expand = c(0,ceiling(max(GSEA_set$numDEInCat)*1.2)/70),
                        limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) +
@@ -221,7 +230,6 @@ GSEA_horiz_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE)
                        aes(y=numDEInCat, x=reorder(cont_cat, order), fill=Over_represented_in))
   h <- horiz_plot +
     geom_bar(colour="black", width=bar_width, stat="identity", position="identity") +
-    #geom_errorbar(aes(ymin=abs_log2FC-se, ymax=abs_log2FC+se), width=.2, size=0.8)
     coord_fixed() + scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
     geom_hline(yintercept=0) +
     scale_y_continuous(expand = c(0,0), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) +
@@ -244,7 +252,6 @@ GSEA_horiz_plot <- function(GSEA_set,cols, bar_cols, bar_width=0.4, facet=FALSE)
 
   hf <- horiz_plot +
     geom_bar(colour="black", width=bar_width, stat="identity", position="identity") +
-    #geom_errorbar(aes(ymin=abs_log2FC-se, ymax=abs_log2FC+se), width=.2, size=0.8)
     facet_grid(. ~ Over_represented_in, scales="free_x", space="free_x") +
     coord_fixed() + scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
     geom_hline(yintercept=0) +
@@ -285,10 +292,9 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
 
 # Produce plots function
 plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=list(go_cols=c(BP="darkred", CC="darkgreen", MF="darkblue"), cog_cols=c(COG="black", eggNOG="purple4")), bar_cols="Set1", bar_width=0.4, groupOntology=1, orientation="vert", prettyTermOpts="comma=TRUE, charNum=35", facet=FALSE, savePlot=TRUE, saveFormat="pdf", rotateSavedPlot=FALSE, plot_width=10, plot_height=15) {
-  #eval(parse(text=sprintf("pretty_term(GSEA_comparison$term, %s)", prettyTermOpts)))
-  # short_term=sapply(term, function(t) pretty_term(t, comma=TRUE), USE.NAMES = FALSE)
+
   # Prepare and filter the geneset by FDR or pvalue and then by contrast. Add needed columns
-  GSEA_comparison <- geneset_results %>% filter_(paste0("over_represented_", GSEA_filter)) %>% filter(contrast==cont, term!="", term!="NA")
+  GSEA_comparison <- geneset_results %>% filter_(paste0("over_represented_", GSEA_filter)) %>% filter(contrast==cont, !is.na(term), term!="", term!="NA")
   GSEA_comparison <- GSEA_comparison %>% mutate(short_term=eval(parse(text=sprintf("pretty_term(GSEA_comparison$term, %s)", prettyTermOpts))), cont_ont=factor(paste(Over_represented_in, ontology, sep="_")), cont_term=paste(short_term, Over_represented_in,  sep="_"), cont_cat=factor(paste(category, Over_represented_in,  sep="_")))
   # fix duplicate short terms
   for (u in unique(GSEA_comparison$cont_term[duplicated(GSEA_comparison$cont_term)])) {
@@ -296,7 +302,7 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
     for (j in 1:length(GSEA_comparison$cont_term)) {
       if (GSEA_comparison$cont_term[j]==u) {
         count=count+1
-        GSEA_comparison$cont_term[j] <- sub("(^[^_]+)", paste0("\\1", paste0(rep("*", count), collapse = "")),u,  perl=TRUE)
+        GSEA_comparison$cont_term[j] <- sub("(^[^_]+)", paste0("\\1", paste0(rep("*", count), collapse = "")),sub("\\^+$", "", u),  perl=TRUE)
       }
     }
   }
@@ -304,8 +310,6 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
   # Sort table and add plotting order
   GSEA_comparison <- GSEA_comparison %>% mutate(cont_term=factor(cont_term)) %>% arrange(Over_represented_in, desc(numDEInCat)) %>% mutate(order=1:nrow(.))
 
-
-  #sortOrder <- ifelse(groupOntology,list("Over_represented_in", orientation_term, "desc(numDEInCat)"), list("Over_represented_in", "desc(numDEInCat)") )
   if (groupOntology!=0) {
     # Add ontology grouping to sort order (both for horizontal and vertical)
     orientation_term <- ifelse(orientation=="vert", "cont_ont", "cont_cat")
@@ -313,10 +317,12 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
     GSEA_comparison <- GSEA_comparison %>% arrange_("Over_represented_in", orientation_term, "desc(numDEInCat)") %>% mutate(order=1:nrow(.))
   }
   # Assign ontology and bar colors for each contrast level
-  geneset_analysis <- ifelse(grepl("^GO.+", GSEA_comparison[1,1], ignore.case = TRUE), "GO", "COG")
+  geneset_analysis <- switch(sub("(^.).+", "\\U\\1", GSEA_comparison[1,1], perl=TRUE),
+                             G="GO", C="COG",E="COG",K="KO")
+
   defaultBrewerPal <- "Set1"
   #brewerPal <- switch(geneset_analysis,"GO" = "Set1", "COG"="Set2")
-  if(length(bar_cols)==length(levels(GSEA_comparison$Over_represented_in)) && all(levels(GSEA_comparison$Over_represented_in) %in% names(named_bar_cols))) {
+  if(length(bar_cols)==length(levels(GSEA_comparison$Over_represented_in)) && all(levels(GSEA_comparison$Over_represented_in) %in% names(bar_cols))) {
     named_bar_cols <- bar_cols
     } else if (is.character(bar_cols) && length(bar_cols)==1) {
     tryCatch(brewerSet<-brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), bar_cols), error=function(e) {message(sprintf("Warning: %sUsing %s instead", e$message, defaultBrewerPal)); brewerSet<-brewer.pal(length(levels(GSEA_comparison$Over_represented_in)), defaultBrewerPal)} )
@@ -350,7 +356,7 @@ minBlastScore <- 100
 
 
 # Fetch ORF data from Trinotate.sqlite
-Trinotate <- src_sqlite("Oyster_Gonad_Trinotate.sqlite")
+Trinotate <- src_sqlite("../../Oyster_Gonad_Trinotate.sqlite")
 
 # Get specific DE analysis table (either from trinotate or upload from a tab-delimited edgeR or DESeq2 output file with a "contrast" column sepcifying the DE contrast(s))
 DE_analysis <- "edgeR_DE"
@@ -418,8 +424,9 @@ sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, c
 
 #####################  KO analysis ######################
 # details of KO analysis
-ko_table <- "ORF_KO"
+ko_table <- "KOBAS_KO"
 geneset_analysis <- "KO"
+
 GSEA_description <- sprintf("%s annotation from UniProt Diamond blastp, with BitScore>%s, based on %s" , geneset_analysis, minBlastScore, DE_analysis)
 GSEA_annotation_source <- "KOBAS"
 
@@ -429,5 +436,13 @@ geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(geneset_data$gen
 # deposit the results back to a table in Trinotate
 # Load data to Trinotate sqlite db
 analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
+
+# Manually set bar colours (Use Set1, but remove the purple which is too similar to the red):
+brewerSet<-brewer.pal(length(levels(geneset_results$Over_represented_in))+1, "Set1")[-4]
+# Create a named vector with color for each contrast level
+bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_in))
+# Plot just 1 contrast:
+#plotGSEA(geneset_results, cont = contrasts[1], groupOntology = 0, GSEA_filter = "pvalue<=0.05", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = FALSE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10)
+
 # plot all contrasts (vertical, no facets).
-sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35"))# GSEA_filter="pvalue<=0.01"
+sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, groupOntology = 0, GSEA_filter = "FDR<=0.1", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = FALSE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 10, ont_cols = NULL))# GSEA_filter="pvalue<=0.01"
