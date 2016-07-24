@@ -314,6 +314,35 @@ plot_Ont_legend <- function(geneset_analysis=geneset_analysis, ont_cols=list(go_
   grid.text(ont_legend$labels,ont_legend$x, ont_legend$y, just="left", gp=gpar(fontsize=20, col=as.character(ont_legend$cols)))
 }
 
+# Produce pathview plots
+produce_pathview <- function(deTable=DE_table,contras, fdr=max_FDR, koTable,pathway, outDir=paste0(geneset_analysis, "_pathway_output")){
+  # create the data set for the de file
+
+  deTable <- deTable %>% filter(contrast==contras, padj<=fdr)
+  de <-  setNames(deTable$log2FoldChange, deTable$Trinity_Id)
+  #     filter(KO_id!="None")
+  ko_matrix <- mol.sum(de, as.data.frame(koTable[koTable$term!="None",c("Trinity_Id", "term")]), sum.method = "mean")
+  colnames(ko_matrix) <- contras
+
+  # Create an output folder for each DE comparison
+  pathDir <- file.path(getwd(),outDir)
+  try(dir.create(pathDir), silent = TRUE)
+  currentDir <- getwd()
+  setwd(ifelse(file.exists(pathDir), pathDir, getwd()))
+  # use this to determine pathview limit: gene = max(abs(geneList))
+  #genelist <- ko_matrix # change to sex matrix to analyse pathways in the other DE set
+  # cat(sprintf("Producing top %s significant KEGG pathways from file %s in folder %s\n ",
+  #            opts$pathview, deFile, pathDir), file=stderr())
+  #topPathways <- koResults[1:as.numeric(opts$pathview),1]
+  # Run Pathview to visualize expression data on KEGG pathways
+  pv.out <- pathview(gene.data = ko_matrix, pathway.id = pathway, species = tolower(geneset_analysis),
+             out.suffix = "DE_KO_pathview", keys.align = "y",
+             kegg.native = T, match.data = F, multi.state = F, same.layer = T,
+             limit = list(gene = max(abs(ko_matrix[,1])), cpd = 1))
+  pathwayFiles <- paste(pathway, c("png", "xml"), sep=".")
+  try(file.remove(pathwayFiles), silent = TRUE)
+  setwd(currentDir)
+}
 
 # Save plot function
 save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf", geneset=geneset_analysis, width=10, height=15){
@@ -509,14 +538,3 @@ sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, c
 # Plot ontology legend (as separate plot)
 plot_Ont_legend(geneset_analysis = geneset_analysis, ont_cols = ko_ont_cols)
 
-# library(gridExtra)
-# ont_legend <- data.frame(labels=names(ko_cols), cols=as.vector(ko_cols), x=0.05)
-# ont_legend$y <- 0.8 - as.numeric(row.names(ont_legend))/10
-# grid.newpage()
-# vp1 <- viewport(width=0.45, height = 0.45)
-# pushViewport(vp1)
-# grid.rect()
-# grid.text(paste(geneset_analysis,"Ontologies"), x = 0.05, y=0.825, just="left", gp=gpar(fontsize=23, fontface="bold"))
-# grid.text(ont_legend$labels,ont_legend$x, ont_legend$y, just="left", gp=gpar(fontsize=20, col=as.character(ont_legend$cols)))
-
-#grid.arrange(g)
