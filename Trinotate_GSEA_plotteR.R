@@ -299,7 +299,7 @@ GSEA_horiz_plot <- function(GSEA_set, cols,  bar_cols, bar_width=0.4, facet=FALS
 }
 
 # Plot ontology legend (as separate plot)
-plot_Ont_legend <- function(geneset_analysis=geneset_analysis, ont_cols=list(go_cols=c("Biological Process"="darkred", "Cell Cycle"="darkgreen", "Molecular Function"="darkblue"), cog_cols=c(COG="black", eggNOG="purple4"))){
+plot_Ont_legend <- function(geneset_analysis=geneset_analysis, savePlot=TRUE, plotFormat="pdf", width=15, height=10, ont_cols=list(go_cols=c("Biological Process"="darkred", "Cell Cycle"="darkgreen", "Molecular Function"="darkblue"), cog_cols=c(COG="black", eggNOG="purple4"))){
   library(gridExtra)
   # sort out ontology colors for each level
   if (length(ont_cols)>0) {
@@ -308,12 +308,21 @@ plot_Ont_legend <- function(geneset_analysis=geneset_analysis, ont_cols=list(go_
   } else stop("No colours were defined for Ontology.", call. = FALSE)
   ont_legend <- data.frame(labels=names(ontology_cols), cols=as.vector(ontology_cols), x=0.05)
   ont_legend$y <- 0.8 - as.numeric(row.names(ont_legend))/10
+  if (savePlot) {
+    outDir=paste0(geneset_analysis, "_output_plots")
+    dir.create(outDir, showWarnings = FALSE)
+    plotFileName <- paste(paste(geneset_analysis, "ontology_legend", format(Sys.Date(), "%d_%m_%y"), sep="_"), plotFormat, sep=".")
+    plotString <- paste0(  plotFormat, "(", "'",file.path(outDir,plotFileName), "'" ,",width=",width, ",height=",height, ")")
+    eval(parse(text=plotString))
+  }
   grid.newpage()
   vp1 <- viewport(width=0.45, height = 0.45)
   pushViewport(vp1)
   grid.rect()
   grid.text(paste(geneset_analysis,"Ontologies"), x = 0.05, y=0.825, just="left", gp=gpar(fontsize=23, fontface="bold"))
   grid.text(ont_legend$labels,ont_legend$x, ont_legend$y, just="left", gp=gpar(fontsize=20, col=as.character(ont_legend$cols)))
+  if (savePlot) dev.off()
+
 }
 
 # Produce pathview plots
