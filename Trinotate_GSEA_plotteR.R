@@ -51,16 +51,16 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, geneset="GO", minPfamScore
   Id_type_select <- switch(Id_type, "orf"=">", "transcript"="=")
 
   # GO annotation from PFAM (with Score>20)
-  GO_sql <- sprintf(" substr(H.pfam_id,1,7) pfam_acc, G.GO_terms as term, H.FullDomainScore FROM (SELECT * FROM HMMERDbase WHERE FullSeqScore>%s AND FullDomainScore>%s GROUP BY QueryProtID HAVING MAX(FullSeqScore) AND MAX(FullDomainScore)) H JOIN (SELECT pfam_acc, group_concat(go_id) AS GO_terms FROM pfam2go GROUP BY pfam_acc) G ON substr(H.pfam_id,1,7)=G.pfam_acc JOIN ORF O ON (H.QueryProtID=O.orf_id) JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY Trinity_Id HAVING MAX(H.FullSeqScore)",minPfamScore, minPfamScore )
+  GO_sql <- sprintf(" substr(H.pfam_id,1,7) pfam_acc, G.GO_terms AS term, H.FullDomainScore FROM (SELECT * FROM HMMERDbase WHERE FullSeqScore>%s AND FullDomainScore>%s GROUP BY QueryProtID HAVING MAX(FullSeqScore) AND MAX(FullDomainScore)) H JOIN (SELECT pfam_acc, group_concat(go_id) AS GO_terms FROM pfam2go GROUP BY pfam_acc) G ON substr(H.pfam_id,1,7)=G.pfam_acc JOIN ORF O ON (H.QueryProtID=O.orf_id) JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY Trinity_Id HAVING MAX(H.FullSeqScore)",minPfamScore, minPfamScore )
 
   # COG Annotation from UniProt blast (with BitScore>100)
-  COG_sql <- sprintf(' S.BitScore, S.Evalue,  E.eggNOGIndexTerm as term, E.eggNOGDescriptionValue as COG_desc from BlastDbase S JOIN UniprotIndex U ON S.UniprotSearchString=U.Accession JOIN eggNOGIndex E ON U.LinkId=E.eggNOGIndexTerm JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="E" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
+  COG_sql <- sprintf(' S.BitScore, S.Evalue,  E.eggNOGIndexTerm AS term, E.eggNOGDescriptionValue AS desc from BlastDbase S JOIN UniprotIndex U ON S.UniprotSearchString=U.Accession JOIN eggNOGIndex E ON U.LinkId=E.eggNOGIndexTerm JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="E" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
 
   # KEGG Annotation from UniProt blastp (grouped by best BitScore ORF)
-  KEGG_sql <- sprintf(' S.BitScore, S.Evalue,  substr(U.LinkId, 1, U.pos-1) as ontology, substr(U.LinkId, U.pos+1, U.pos2-1) as Kegg_species, substr(U.LinkId,U.pos2+U.pos+1) as term from BlastDbase S JOIN (select *, instr(LinkId,":") AS pos, instr(substr(LinkId, instr(LinkId,":")+1),":") AS pos2 from UniprotIndex) U ON S.UniprotSearchString=U.Accession JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="K" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
+  KEGG_sql <- sprintf(' S.BitScore, S.Evalue,  substr(U.LinkId, 1, U.pos-1) AS ontology, substr(U.LinkId, U.pos+1, U.pos2-1) AS Kegg_species, substr(U.LinkId,U.pos2+U.pos+1) AS term from BlastDbase S JOIN (select *, instr(LinkId,":") AS pos, instr(substr(LinkId, instr(LinkId,":")+1),":") AS pos2 from UniprotIndex) U ON S.UniprotSearchString=U.Accession JOIN ORF O on S.TrinityID=O.orf_id JOIN Transcript T on O.transcript_id=T.transcript_id WHERE U.AttributeType="K" AND instr(S.TrinityID, "m.")>0 AND S.BitScore>%s GROUP BY Trinity_Id HAVING MAX(S.BitScore)', minBlastScore)
 
   # KEGG KO Annotation from KOBAS
-  KO_sql <- sprintf(' K.KO_ID AS term, K.KO_name as desc from (SELECT * FROM %s WHERE instr(TrinityID, "m.")%s0) K JOIN ORF O on K.TrinityID=O.%s JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY K.TrinityID HAVING min(O.rowid)',ko_table, Id_type_select, paste0(Id_type, "_id"))
+  KO_sql <- sprintf(' K.KO_ID AS term, K.KO_name AS desc from (SELECT * FROM %s WHERE instr(TrinityID, "m.")%s0) K JOIN ORF O on K.TrinityID=O.%s JOIN Transcript T on O.transcript_id=T.transcript_id GROUP BY K.TrinityID HAVING min(O.rowid)',ko_table, Id_type_select, paste0(Id_type, "_id"))
 
   # construct the whole SQL query
   sql_query <- switch (tolower(geneset),
@@ -82,12 +82,7 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, geneset="GO", minPfamScore
         function(l) paste(gsub('(ko[0-9]*).*','\\1',transcript_kegg_info_list[[l]]), collapse=","),
         USE.NAMES = FALSE)) %>% filter(term!="")
   }
-
-#   geneset_DE_data <- DE_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_table$term[match(.$Trinity_Id, geneset_table$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
-#
-#   geneset_tables <- list(geneset_table=geneset_table, geneset_DE_data=geneset_DE_data)
   return(geneset_table)
-
 }
 
 # Calculate GSEA values for DE genes for a specific contrast and geneset analysis
@@ -103,28 +98,9 @@ GSEA <- function(de_table, geneset_data, contras, max_FDR=0.05, min_log2FC=2, de
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
     multip <- switch(i, 1, -1)
-    de_ids <- de_data %>%
-      filter(contrast==contras, multip*log2FoldChange>=2) %>% dplyr::select(Trinity_Id)
+    de_ids <- de_data %>% filter(contrast==contras, multip*log2FoldChange>=2) %>%
+      dplyr::select(Trinity_Id)
     cat_geneset_data_vec <- as.integer(geneset_data$Trinity_Id %in% de_ids$Trinity_Id)
-
-#     # Assign KEGG pathways to each gene
-#     cat(sprintf("Please wait, assigning KEGG pathways..."), file=stderr())
-#     transcript_kegg_info_list <- sapply(transcript_ko_mapping$KO_id,
-#                                         function(y) names(kegg_ko[[1]])[sapply(kegg_ko[[1]], FUN=function(x) y %in% x)])
-#     transcript_ko_mapping$KO_pathway <- sapply(transcript_ko_mapping$KO_id,
-#                                                function(l) paste(gsub('(ko[0-9]*).*','\\1',
-#                                                                       transcript_kegg_info_list[[l]]), collapse=","), USE.NAMES = FALSE)
-#     cat(sprintf("Done!\n"), file=stderr())
-#     transcript_with_kegg_pathway <- transcript_ko_mapping[with(transcript_ko_mapping,KO_pathway!=""),]
-#     # Transfer KEGG pathways into named list
-#     transcript_kegg_pathway_info_listed = lapply(transcript_with_kegg_pathway$KO_pathway, function(x) unlist(strsplit(x,',')))
-#     names(transcript_kegg_pathway_info_listed) = transcript_with_kegg_pathway$transcript_id
-#     # Calculating the probability that a gene will be differentially expressed (DE), based on its length alone
-#     pwf=nullp(transcript_with_kegg_pathway$DE_flag,bias.data=transcript_with_kegg_pathway$length)
-#     row.names(pwf) = transcript_with_kegg_pathway$transcript_id
-#     # Perform GSEA for KEGG pathways
-#     KO_res <- goseq(pwf,gene2cat=transcript_kegg_pathway_info_listed, test.cats="KEGG")
-#     colnames(KO_res)[1] <- "KEGG_category"
 
     geneset_data_pwf <- nullp(cat_geneset_data_vec,bias.data=geneset_data$length,plot.fit = FALSE)
     rownames(geneset_data_pwf) = geneset_data$Trinity_Id
@@ -367,9 +343,14 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
     infile <- file.path(outDir,pngName, fsep=fsep)
     outfile <- file.path(outDir,paste0("Rotated_", pngName), fsep=fsep)
     if (.Platform$OS.type=="windows") {
-      system2("powershell", args=c("-ExecutionPolicy ByPass -command lib\\FlipImage.ps1",
-                                   infile, outfile), wait = TRUE, invisible = TRUE)
-      error_msg <- sprintf("Could not rotate image or save it into <%s>, please verify that Powershell and lib\\FlipImage.ps1 are available in the current working directory", outfile)
+      switch (plotFormat,
+        png = system2("powershell", args=c("-ExecutionPolicy ByPass -command lib\\FlipImage.ps1",
+                                           infile, outfile), wait = TRUE, invisible = TRUE),
+        pdf = system2("powershell", args=c("-ExecutionPolicy ByPass -command lib\\Rotate_PDF_win.ps1",
+                                         infile, outfile), wait = TRUE, invisible = TRUE)
+      )
+
+      error_msg <- sprintf("Could not rotate image or save it into <%s>, please verify that Powershell is installed and lib folder is available in the current working directory", outfile)
       } else {
         system2("convert",args=c(infile, "-rotate",angle, outfile),
                    wait = TRUE, invisible = TRUE)
@@ -377,7 +358,7 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
       }
     if (!file.exists(outfile)) message(error_msg)
   }
-  if (rotate && plotFormat=="png") imageFlip()
+  if (rotate) imageFlip()
 
 }
 
