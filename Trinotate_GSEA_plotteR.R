@@ -89,11 +89,7 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, geneset="GO", minPfamScore
 GSEA <- function(de_table, geneset_data, contras, max_FDR=0.05, min_log2FC=2, description, annotation_source, analysis_date=format(Sys.Date(), "%d/%m/%Y"), geneset="GO") {
   contrast_levels <- unlist(strsplit(contras, "_vs_"))
   de_data <- de_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_data$term[match(.$Trinity_Id, geneset_data$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
-#   if (tolower(geneset)=="ko") {
-#     # Setup KEGG_KO description table and terms
-#     cat(sprintf("Please wait, preparing KEGG orthologies information...\n"), file=stderr())
-#     kegg_ko <- kegg.gsets("ko")
-#   }
+
   GOseq_result_table <- NULL
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
@@ -139,10 +135,6 @@ GSEA <- function(de_table, geneset_data, contras, max_FDR=0.05, min_log2FC=2, de
 
 
       GOseq_result_table <- GOseq_result_table %>% mutate(term=term_dict$desc[match(.$category, term_dict$term)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
-#       if (tolower(geneset)=="ko") {
-#         long_term_dict <- data.frame(term=gsub('ko([0-9]*) .*','K\\1', names(kegg_ko[[1]])),
-#                                          desc=gsub('ko[0-9]* (.*)','\\1', names(kegg_ko[[1]])))
-#         GOseq_result_table <- GOseq_result_table %>% mutate(long_term=long_term_dict$desc[match(.$category, long_term_dict$term, nomatch=NA_character_)])
        }
 
   return(GOseq_result_table)
@@ -383,11 +375,14 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
   # Sort table and add plotting order
   GSEA_comparison <- GSEA_comparison %>% mutate(cont_term=factor(cont_term)) %>% arrange(Over_represented_in, desc(numDEInCat)) %>% mutate(order=1:nrow(.))
 
-  if (groupOntology!=0) {
-    # Add ontology grouping to sort order (both for horizontal and vertical)
-    orientation_term <- ifelse(orientation=="vert", "cont_ont", "cont_cat")
-    if (groupOntology<0) orientation_term <- sprintf("desc(%s)", orientation_term)
-    GSEA_comparison <- GSEA_comparison %>% arrange_("Over_represented_in", orientation_term, "desc(numDEInCat)") %>% mutate(order=1:nrow(.))
+  # Sort by functional groups
+  sort_funGroup <- switch (as.character(groupOntology),
+                           "0" = NULL,
+                           "1" = ifelse(orientation=="vert", "cont_ont", "cont_cat"),
+                           "-1" = sprintf("desc(%s)", ifelse(orientation=="vert", "cont_ont", "cont_cat"))
+  )
+  sort_order <- c("Over_represented_in", sort_funGroup, "desc(numDEInCat)")
+  GSEA_comparison <- GSEA_comparison %>% arrange_(.dots = as.list(sort_order)) %>% mutate(order=1:nrow(.))
   }
   # Assign ontology and bar colors for each contrast level
   geneset_analysis <- switch(sub("(^.).+", "\\U\\1", GSEA_comparison[1,1], perl=TRUE),
