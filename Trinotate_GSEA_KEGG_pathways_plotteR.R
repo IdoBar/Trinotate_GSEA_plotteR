@@ -37,7 +37,7 @@ GSEA_description <- sprintf("%s annotation from %s, with FullDomainScore>20>%s, 
 
 # Fetch and process GO data
 geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type, geneset = geneset_analysis)
-geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("ontology","contrast", "Over_represented_in"))
+geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("contrast", "Over_represented_in"))
 
 # deposit the results back to a table in Trinotate
 # Load data to Trinotate sqlite db
@@ -50,7 +50,7 @@ brewerSet<-brewer.pal(9, "Set1")[-c(4:5,8)]
 bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_in))
 
 # Plot just 1 contrast:
-#plotGSEA(geneset_results, cont = contrasts[2], GSEA_filter = "FDR<=0.1", groupOntology = -1, bar_cols = bar_color_names, bar_width = 0.45, savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = FALSE, prettyTermOpts = "charNum=35, comma=TRUE", plot_width = 15, plot_height = 15)
+#plotGSEA(geneset_results, cont = contrasts[5], GSEA_filter = "FDR<=0.1", groupOntology = 1, bar_cols = bar_color_names, bar_width = 0.45, savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = TRUE, prettyTermOpts = "charNum=35, comma=TRUE", plot_width = 15, plot_height = 15, facet=FALSE)
 
 # plot all contrasts (vertical, no facets).
 sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, bar_cols = bar_color_names, bar_width = 0.45, GSEA_filter = "FDR<=0.1", savePlot = TRUE, prettyTermOpts = "charNum=35, comma=TRUE", plot_width = 15, plot_height = 15))
@@ -67,7 +67,7 @@ GSEA_description <- sprintf("%s annotation from %s, with BitScore>%s, based on %
 
 # Fetch and process COG data
 geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type, geneset = geneset_analysis)
-geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("ontology","contrast", "Over_represented_in"))
+geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("contrast", "Over_represented_in"))
 
 # deposit the results back to a table in Trinotate
 # Load data to Trinotate sqlite db
@@ -96,8 +96,10 @@ GSEA_description <- sprintf("%s annotation from %s, with eValue<%s, based on %s"
 
 # Fetch and process KO data
 geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type, geneset = geneset_analysis, ko_table = ko_table)
-geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("ontology","contrast", "Over_represented_in"))
+geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("contrast", "Over_represented_in"))
 
+
+#"ontology"
 # deposit the results back to a table in Trinotate
 # Load data to Trinotate sqlite db
 analysis_name <- paste(geneset_analysis, DE_analysis, sep="_")
@@ -110,7 +112,7 @@ bar_color_names <- setNames(brewerSet, levels(geneset_results$Over_represented_i
 # set ontology colours
 ko_ont_cols <- list(ko_cols=setNames(brewer.pal(length(unique(geneset_results$ontology)), "Dark2"), unique(geneset_results$ontology)))
 # Plot just 1 contrast:
-#plotGSEA(geneset_results, cont = contrasts[6], groupOntology = -1, ont_cols = ko_ont_cols, GSEA_filter = "FDR<=0.1", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = TRUE, plot_width = 15, plot_height = 15)
+#plotGSEA(geneset_results, cont = contrasts[5], groupOntology = -1, ont_cols = ko_ont_cols, GSEA_filter = "FDR<=0.1", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = TRUE, plot_width = 15, plot_height = 15)
 
 # plot all contrasts (vertical, no facets).
 sapply(levels(geneset_results$contrast), function(x) plotGSEA(geneset_results, cont = x, groupOntology = 1, ont_cols = ko_ont_cols, GSEA_filter = "pvalue<=0.05", bar_cols = bar_color_names, bar_width = 0.45, prettyTermOpts = "comma=FALSE, charNum=35", savePlot = TRUE, saveFormat = "pdf", rotateSavedPlot = FALSE, plot_width = 15, plot_height = 15))# GSEA_filter="pvalue<=0.01"
