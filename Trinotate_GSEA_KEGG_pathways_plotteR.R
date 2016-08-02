@@ -17,7 +17,7 @@ Trinotate <- src_sqlite("../../../de_novo_Trinotate_db/Lentils_Trinotate.sqlite"
 
 # Get specific DE analysis table (either from trinotate or upload from a tab-delimited edgeR or DESeq2 output file with a "contrast" column sepcifying the DE contrast(s))
 DE_analysis <- "ORF_DE_kallisto"
-DE_table <- tbl(Trinotate, DE_analysis) %>% collect()
+DE_table <- tbl(Trinotate, DE_analysis) %>% collect(n=Inf)
 # DE_table <- read.delim("DE_Analysis_filename")
 
 TrinityId_type <- ifelse(grepl("m\\.\\d+", DE_table[1,1], perl = TRUE),"orf", "transcript")
@@ -96,6 +96,7 @@ GSEA_description <- sprintf("%s annotation from %s, with eValue<%s, based on %s"
 
 # Fetch and process KO data
 geneset_data <- prepare_geneset_data(Trinotate, TrinityId_type, geneset = geneset_analysis, ko_table = ko_table)
+# Consider adding filter(ontology!="Human Diseases") for non-human species
 geneset_results <- bind_rows(lapply(contrasts, function(x) GSEA(DE_table, geneset_data, contras = x, description = GSEA_description, annotation_source = GSEA_annotation_source, geneset = geneset_analysis))) %>% mutate_each_(funs(factor), c("contrast", "Over_represented_in"))
 
 

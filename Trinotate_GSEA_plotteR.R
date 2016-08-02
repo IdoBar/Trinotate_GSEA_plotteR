@@ -28,7 +28,7 @@ install.deps <- function(p, repo="cran"){
 
 
 # Install and load cran packages
-CRAN_packages <- c("RCurl", "pander", "grid", "RColorBrewer", "dplyr", "tidyr"  ,"ggplot2", "knitr")
+CRAN_packages <- c("RCurl", "grid", "RColorBrewer", "dplyr", "tidyr"  ,"ggplot2", "gridExtra")
 install.deps(CRAN_packages)
 
 # Install and load bioconductor packages
@@ -180,7 +180,7 @@ GSEA_vert_plot <- function(GSEA_set,geneset_analysis, cols, bar_cols, bar_width=
           legend.title=element_blank(),
           legend.text.align=1,
           #legend.position=c(length(GSEA_set$numDEInCat[GSEA_set$Over_represented_in==GSEA_set$Over_represented_in[1]])/ nrow(GSEA_set)-0.025,0.95), legend.justification=c(1,1),
-          legend.position=c(which.min(GSEA_set$numDEInCat[GSEA_set$Over_represented_in==GSEA_set$Over_represented_in[1]])/ nrow(GSEA_set)+0.025,0.95), legend.justification=c(1,1),
+          legend.position=c(which.min(GSEA_set$numDEInCat[GSEA_set$Over_represented_in==GSEA_set$Over_represented_in[1]])/ nrow(GSEA_set)+0.01,0.95), legend.justification=c(1,1),
           axis.text.y=element_text(angle=90, hjust=0.5), # 0.5
           axis.text.x=element_text(angle=90, hjust=1, vjust=0.2, colour = as.vector(cols[GSEA_set$ontology])),
           panel.grid.major.x = element_blank())
@@ -409,6 +409,9 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
   print(eval(parse(text=paste("GSEA", orientation, "plot(GSEA_comparison, cols=ontology_cols, bar_cols=named_bar_cols, bar_width=bar_width, facet=facet)", sep="_"))))
   if (savePlot) save_GSEA_Plot(GSEA_comparison, orientation, rotateSavedPlot, saveFormat, width=plot_width, height=plot_height, geneset = geneset_analysis)
 }
+
+# Copy lib folder to the current working directory
+
 
 
 
