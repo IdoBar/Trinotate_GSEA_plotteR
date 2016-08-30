@@ -88,13 +88,13 @@ prepare_geneset_data <- function(Trinotatedb,Id_type, geneset="GO", minPfamScore
 # Calculate GSEA values for DE genes for a specific contrast and geneset analysis
 GSEA <- function(de_table, geneset_data, contras, max_FDR=0.05, min_log2FC=2, description, annotation_source, analysis_date=format(Sys.Date(), "%d/%m/%Y"), geneset="GO") {
   contrast_levels <- unlist(strsplit(contras, "_vs_"))
-  de_data <- de_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC) %>% mutate(contrast=factor(contrast),term=geneset_data$term[match(.$Trinity_Id, geneset_data$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
+  de_data <- de_table %>% filter(padj<=max_FDR, abs(log2FoldChange)>=min_log2FC,contrast==contras) %>% mutate(term=geneset_data$term[match(.$Trinity_Id, geneset_data$Trinity_Id)]) %>% filter(!is.na(.$term), term!="", term!="NA", term!="None")
 
   GOseq_result_table <- NULL
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
-    multip <- switch(i, 1, -1)
-    de_ids <- de_data %>% filter(contrast==contras, multip*log2FoldChange>=2) %>%
+    multip <- ifelse(i==1, -1, 1)
+    de_ids <- de_data %>% filter(multip*log2FoldChange>=min_log2FC) %>%
       dplyr::select(Trinity_Id)
     cat_geneset_data_vec <- as.integer(geneset_data$Trinity_Id %in% de_ids$Trinity_Id)
 
