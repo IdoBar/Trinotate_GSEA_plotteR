@@ -93,7 +93,7 @@ GSEA <- function(de_table, geneset_data, contras, max_FDR=0.05, min_log2FC=2, de
   GOseq_result_table <- NULL
   for (i in 1:length(contrast_levels)) {
     # create a binary named list which marks with an 1 an ORF that is DE, and 0 if it's not (from all ORFs with GO)
-    multip <- ifelse(i==1, -1, 1)
+    multip <- ifelse(i==1, 1, -1)
     de_ids <- de_data %>% filter(multip*log2FoldChange>=min_log2FC) %>%
       dplyr::select(Trinity_Id)
     cat_geneset_data_vec <- as.integer(geneset_data$Trinity_Id %in% de_ids$Trinity_Id)
@@ -197,7 +197,7 @@ GSEA_vert_plot <- function(GSEA_set,geneset_analysis, cols, bar_cols, bar_width=
           panel.grid.major.x = element_blank())
 
   p <- vert_plot  +
-       scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in],
+       scale_fill_manual(values = bar_cols,
                       guide = guide_legend(direction = "horizontal",
                       label.position="bottom", label.hjust = 0.5, label.vjust = 0.5,                                                   label.theme = element_text(angle = 90, size=20))) + GSEA_vert_theme
   #title.theme = element_text(angle = 90, face="bold", size=20)
@@ -228,9 +228,9 @@ GSEA_horiz_plot <- function(GSEA_set, cols,  bar_cols, bar_width=0.4, facet=FALS
 
   horiz_plot <- ggplot(GSEA_set,
                        aes(y=numDEInCat, x=reorder(cont_cat, order), fill=Over_represented_in))
-  h <- horiz_plot +
+  hz <- horiz_plot +
     geom_bar(colour="black", width=bar_width, stat="identity", position="identity") +
-    coord_fixed() + scale_fill_manual(values = bar_cols[GSEA_set$Over_represented_in]) +
+    coord_fixed() + scale_fill_manual(values = bar_cols) + #[levels(GSEA_set$Over_represented_in)]
     geom_hline(yintercept=0) +
     scale_y_continuous(expand = c(0,0), limits=c(0,ceiling(max(GSEA_set$numDEInCat)*1.2))) +
     scale_x_discrete(labels = reorder(sub("([^_]+)_.+", "\\1", GSEA_set$cont_cat), GSEA_set$order)) +
@@ -260,7 +260,7 @@ GSEA_horiz_plot <- function(GSEA_set, cols,  bar_cols, bar_width=0.4, facet=FALS
     #  scale_fill_brewer(palette = "Set2", limits=c("Testis", "Ovary")) +
     labs(x="Term", y="Number of DE genes", fill="Over-represented\nin group\n") + GSEA_horizontal_facet_theme
   if (facet) hf
-  else h
+  else hz
 }
 
 # Plot ontology legend (as separate plot)
@@ -321,10 +321,11 @@ produce_pathview <- function(deTable=DE_table,contras, fdr=max_FDR, koTable,path
 }
 
 # Save plot function
-save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf", geneset=geneset_analysis, width=10, height=15){
+save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf", geneset=geneset_analysis, sig_value, width=10, height=15){
   outDir=paste0(geneset, "_output_plots")
   dir.create(outDir, showWarnings = FALSE)
-  plotFileName <- paste(paste(geneset, unique(GSEA_set$contrast), orientation, format(Sys.Date(), "%d_%m_%y"), sep="_"), plotFormat, sep=".")
+  sig <- sub("(\\w+)[<=]+(\\d*.+)", "\\1_\\2", sig_value)
+  plotFileName <- paste(paste(geneset, unique(GSEA_set$contrast), sig, orientation, format(Sys.Date(), "%d_%m_%y"), sep="_"), plotFormat, sep=".")
   ggsave(file.path(outDir,plotFileName), width=width, height=height)
   # flip the image (needed for markdown output and requires powershell in windows and ImageMagick in Linux)
   imageFlip <- function(angle=90, flipDir=outDir, pngName=plotFileName){
@@ -354,7 +355,7 @@ save_GSEA_Plot <- function(GSEA_set, orientation, rotate=FALSE, plotFormat="pdf"
 
 # Produce plots function
 plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=list(go_cols=c(BP="darkred", CC="darkgreen", MF="darkblue"), cog_cols=c(COG="black", eggNOG="purple4")), bar_cols="Set1", bar_width=0.4, groupOntology=1, orientation="vert", prettyTermOpts="comma=TRUE, charNum=35", facet=FALSE, savePlot=TRUE, saveFormat="pdf", rotateSavedPlot=FALSE, plot_width=10, plot_height=15) {
-
+  cont_levels <- unlist(strsplit(cont, split = "_vs_", fixed = TRUE))
   # Prepare and filter the geneset by FDR or pvalue and then by contrast. Add needed columns
   GSEA_comparison <- geneset_results %>% filter_(paste0("over_represented_", GSEA_filter)) %>% filter(contrast==cont, !is.na(term), term!="", term!="NA")
   GSEA_comparison <- GSEA_comparison %>% mutate(short_term=eval(parse(text=sprintf("pretty_term(GSEA_comparison$term, %s)", prettyTermOpts))), cont_ont=paste(Over_represented_in, ontology, sep="_"), cont_term=paste(short_term, Over_represented_in,  sep="_"), cont_cat=paste(category, Over_represented_in,  sep="_"), ontology=as.character(ontology))
@@ -372,14 +373,7 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
   # Sort table and add plotting order
  # GSEA_comparison <- GSEA_comparison %>% arrange(Over_represented_in, desc(numDEInCat)) %>% mutate(order=1:nrow(.))
   # mutate(cont_term=factor(cont_term)) %>%
-  # Sort by functional groups
-  sort_funGroup <- switch (as.character(groupOntology),
-                           "0" = NULL,
-                           "1" = ifelse(orientation=="vert", "cont_ont", "cont_cat"),
-                           "-1" = sprintf("desc(%s)", ifelse(orientation=="vert", "cont_ont", "cont_cat"))
-  )
-  sort_order <- c("Over_represented_in", sort_funGroup, "desc(numDEInCat)")
-  GSEA_comparison <- GSEA_comparison %>% arrange_(.dots = as.list(sort_order)) %>% mutate(order=1:nrow(.))
+
 
   # Assign ontology and bar colors for each contrast level
   geneset_analysis <- switch(sub("(^.).+", "\\U\\1", GSEA_comparison$category[1], perl=TRUE),
@@ -406,12 +400,19 @@ plotGSEA <- function(geneset_results, GSEA_filter="FDR<=0.1", cont, ont_cols=lis
       #ontology_cols <- c(ontology_cols, setNames(as.vector(ont_cols[[col_list]]), outer(i, names(ont_cols[[col_list]]),paste, sep="_")))
     #}
   }
+  # Remove unused and reorder levels to plot by correct contrast order
+  GSEA_comparison <- GSEA_comparison %>% mutate(Over_represented_in=factor(Over_represented_in, levels=rev(cont_levels)))
+  # Sort by functional groups
+  sort_funGroup <- switch (as.character(groupOntology),
+                           "0" = NULL,
+                           "1" = ifelse(orientation=="vert", "cont_ont", "cont_cat"),
+                           "-1" = sprintf("desc(%s)", ifelse(orientation=="vert", "cont_ont", "cont_cat"))
+  )
+  sort_order <- c("Over_represented_in", sort_funGroup, "desc(numDEInCat)")
+  GSEA_comparison <- GSEA_comparison %>% arrange_(.dots = as.list(sort_order)) %>% mutate(order=1:nrow(.))
+
   print(eval(parse(text=paste("GSEA", orientation, "plot(GSEA_comparison, cols=ontology_cols, bar_cols=named_bar_cols, bar_width=bar_width, facet=facet)", sep="_"))))
-  if (savePlot) save_GSEA_Plot(GSEA_comparison, orientation, rotateSavedPlot, saveFormat, width=plot_width, height=plot_height, geneset = geneset_analysis)
+  if (savePlot) save_GSEA_Plot(GSEA_comparison, orientation, rotateSavedPlot, saveFormat, width=plot_width, height=plot_height, geneset = geneset_analysis, sig_value=GSEA_filter)
 }
 
 # Copy lib folder to the current working directory
-
-
-
-
